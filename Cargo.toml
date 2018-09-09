@@ -1,0 +1,6 @@
+[package]
+name = "BelieVMr"
+version = "0.1.0"
+authors = ["Strexicious <strexicious@gmail.com>"]
+
+[dependencies]
