@@ -5,4 +5,4 @@ authors = ["Strexicious <strexicious@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-"nom" = "5.0.0-beta1"
+pom = "3.0.2"

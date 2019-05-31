@@ -4,7 +4,7 @@
 
 | Instructions      | OpCode | Operations                                |
 | ----------------- | ------ | ----------------------------------------- |
-| mov literal, dest | 0x10   | dest = binary(literal)                    |
+| mov integer, dest | 0x10   | dest = binary(integer)                    |
 | add src, dest     | 0x11   | dest = dest + src                         |
 | sub src, dest     | 0x12   | dest = dest - src                         |
 | and src, dest     | 0x13   | dest = dest & src                         |
@@ -19,6 +19,19 @@
 | jle offset        | 0x22   | jump if less than or equal bits set       |
 | je offset         | 0x23   | jump if only equal bits set               |
 
-src and dest are 16 bit hexadecimal memory addresses prefixed with "0x"
-offset is 16 bit decimal integer
-literal is 32 bit decimal or hexadecimal prefixed with "0x" integer
+
+
+#### Grammar
+
+`src` and `dest` are memory addresses. Memory addresses are 16 bits hexadecimal values. Hexadecimal values must be prefixed with "0x". `offset` is a 16 bit decimal value. `integer` is 32 bit decimal value with sign or hexadecimal representation of it in two's complement.
+
+``` 
+instr	 ::= movInstr | aluInstr | jmpInstr
+movInstr ::= "mov" integer "," HEX_NUMBER
+aluInstr ::= aluOp HEX_NUMBER "," HEX_NUMBER
+jmpInstr ::= jCond offset
+integer  ::= DEC_NUMBER | HEX_NUMBER
+aluOp	 ::= "add" | "sub" | "and" | "or" | "xor" | "cmp" | "sll" | "srl" | "sra"
+jCond	 ::= "j" | "jl" | "jle" | "je"
+```
+

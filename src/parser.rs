@@ -1,103 +1,115 @@
-use nom::*;
+use pom::parser::Parser;
+use pom::parser::*;
+use pom::char_class::*;
 
-fn parse_u16_hex(input: &str) -> Result<u16, std::num::ParseIntError> {
-    u16::from_str_radix(input, 16)
+fn whitespace<'a>() -> Parser<'a, u8, ()> {
+    is_a(space).repeat(1..).discard()
 }
 
-fn parse_i32_hex_unsigned(input: &str) -> Result<i32, std::num::ParseIntError> {
-    Ok(u32::from_str_radix(input, 16)? as i32)
+fn whitespace_opt<'a>() -> Parser<'a, u8, ()> {
+    is_a(space).repeat(0..).discard()
 }
 
-named!(hex_string<&str, &str>, take_while1!(|c: char| c.is_ascii_hexdigit()));
-named!(hex_number<&str, &str>, preceded!(tag!("0x"), hex_string));
-named!(dec_string<&str, &str>, take_while1!(|c: char| c.is_ascii_digit()));
-named!(dec_number<&str, &str>, map!(pair!(opt!(tag!("-")), dec_string),
-    move |(s1, s2)| {
-        match s1 {
-            Some(s1) => {
-                let l1 = s1.len();
-                let l2 = s2.len();
-                let s1_ptr = s1.as_ptr();
+fn dec_value<'a>() -> Parser<'a, u8, String> {
+    let value = sym(b'-').opt() + is_a(digit).repeat(1..);
+    value.collect().convert(std::str::from_utf8).map(String::from)
+}
 
-                unsafe {
-                    let joined = std::slice::from_raw_parts(s1_ptr, l1 + l2);
-                    std::str::from_utf8_unchecked(joined)
-                }
-            },
-            None => s2
-        }
-    }));
+fn hex_value<'a>() -> Parser<'a, u8, String> {
+    let value = seq(b"0x") * is_a(hex_digit).repeat(1..);
+    value.convert(String::from_utf8)
+}
 
-named!(mem_addr<&str, u16>, map_res!(hex_number, parse_u16_hex));
-named!(offset<&str, i16>, flat_map!(dec_number, parse_to!(i16)));
-named!(literal<&str, i32>,
-    alt!(
-        flat_map!(dec_number, parse_to!(i32)) |
-        map_res!(hex_number, parse_i32_hex_unsigned)
-    )
-);
+fn mem_addr<'a>() -> Parser<'a, u8, u16> {
+    hex_value().convert(|h| u16::from_str_radix(&h, 16))
+}
 
-named!(mov_instr<&str, [u8; 7]>, do_parse!(
-    tag!("mov ") >>
-    op_literal: literal >>
-    tag!(", ") >>
-    op_dest: mem_addr >>
-    ({
-        let lit_bytes = op_literal.to_be_bytes();
-        let dest_bytes = op_dest.to_be_bytes();
-        [0x10, lit_bytes[0], lit_bytes[1], lit_bytes[2], lit_bytes[3], dest_bytes[0], dest_bytes[1]]
-    })
-));
+fn offset<'a>() -> Parser<'a, u8, i16> {
+    dec_value().convert(|d| i16::from_str_radix(&d, 10))
+}
 
-fn create_alu_parser<'a>(mnemonic: &'a str, opcode: u8) -> impl Fn(&str) -> IResult<&str, [u8; 5]> + 'a
-{
-    move |input: &str| do_parse!(input,
-        tag!(mnemonic) >>
-        tag!(" ") >>
-        src: mem_addr >>
-        tag!(", ") >>
-        dest: mem_addr >>
-        ({
-            let src_bytes = src.to_be_bytes();
-            let dest_bytes = dest.to_be_bytes();
-            [opcode, src_bytes[0], src_bytes[1], dest_bytes[0], dest_bytes[1]]
-        })
-    )
+fn integer<'a>() -> Parser<'a, u8, i32> {
+    let dec_repr = dec_value().convert(|d| d.parse());
+    let hex_repr = hex_value().convert(|h| u32::from_str_radix(&h, 16)).map(|num| num as i32);
+    hex_repr | dec_repr
+}
+
+fn alu_op<'a>() -> Parser<'a, u8, u8> {
+    let add = seq(b"add").map(|_| 0x11);
+    let sub = seq(b"sub").map(|_| 0x12);
+    let and = seq(b"and").map(|_| 0x13);
+    let or = seq(b"or").map(|_| 0x14);
+    let xor = seq(b"xor").map(|_| 0x15);
+    let cmp = seq(b"cmp").map(|_| 0x16);
+    let sll = seq(b"sll").map(|_| 0x17);
+    let srl = seq(b"srl").map(|_| 0x18);
+    let sra = seq(b"sra").map(|_| 0x19);
+    add | sub | and | or | xor | cmp | sll | srl | sra
+}
+
+fn j_cond<'a>() -> Parser<'a, u8, u8> {
+    let j = seq(b"j").map(|_| 0x20);
+    let jl = seq(b"jl").map(|_| 0x21);
+    let jle = seq(b"jle").map(|_| 0x22);
+    let je = seq(b"je").map(|_| 0x23);
+    jle | jl | je | j
+}
+
+fn mov_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+    let op_code = seq(b"mov").map(|_| 0x10) - whitespace();
+    let literal = integer().map(|i| i.to_be_bytes()) - whitespace_opt();
+    let dest = sym(b',').discard() * whitespace() * mem_addr().map(|i| i.to_be_bytes());
+    (op_code + literal + dest).map(|((a, b), c)| vec![a, b[0], b[1], b[2], b[3], c[0], c[1]])
+}
+
+fn alu_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+    let op_code = alu_op() - whitespace();
+    let src = mem_addr().map(|i| i.to_be_bytes()) - whitespace_opt();
+    let dest = sym(b',').discard() * whitespace() * mem_addr().map(|i| i.to_be_bytes());
+    (op_code + src + dest).map(|((a, b), c)| vec![a, b[0], b[1], c[0], c[1]])
+}
+
+fn jmp_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+    let op_code = j_cond() - whitespace();
+    let off = offset().map(|i| i.to_be_bytes());
+    (op_code + off).map(|(a, b)| vec![a, b[0], b[1]])
+}
+
+pub fn instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+    whitespace_opt() * (mov_instr() | alu_instr() | jmp_instr()) - (whitespace_opt() + end())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use nom::error::ErrorKind;
-    
+
+    #[test]
+    fn whitespaces() {
+        assert_eq!(whitespace_opt().parse(b""), Ok(()));
+        assert_eq!(whitespace_opt().parse(b" "), Ok(()));
+        assert_eq!(whitespace().parse(b" "), Ok(()));
+        assert_eq!(whitespace().parse(b"    "), Ok(()));
+    }
+
+    #[test]
+    fn numbers() {
+        assert_eq!(dec_value().parse(b"4352"), Ok(String::from("4352")));
+        assert_eq!(dec_value().parse(b"-43522141421421"), Ok(String::from("-43522141421421")));
+        assert_eq!(hex_value().parse(b"0xfed0023eabbc334"), Ok(String::from("fed0023eabbc334")));
+        assert_eq!(integer().parse(b"0xFFFFFFFF"), Ok(-1i32));
+        assert_eq!(integer().parse(b"210491581"), Ok(210_491_581i32));
+    }
+
     #[test]
     fn mem_addr_parses() {
-        assert_eq!(Ok(("", 4847)), mem_addr("0x12EF"));
-        assert_eq!(Err(Err::Error(("12EF", ErrorKind::Tag))), mem_addr("12EF"));
-        assert_eq!(Err(Err::Incomplete(Needed::Size(2))), mem_addr("0x12"));
+        assert_eq!(mem_addr().parse(b"0xA12B"), Ok(41_259u16));
+        assert_eq!(mem_addr().parse(b"0xFFFF"), Ok(65_535u16));
     }
 
     #[test]
     fn offset_parses() {
-        assert_eq!(Ok(("", 32767)), offset("32767"));
-        assert_eq!(Ok(("", -32768)), offset("-32768"));
-        assert_eq!(Err(nom::Err::Error(("32768", ErrorKind::ParseTo))), offset("32768"));
-    }
-
-    #[test]
-    fn literal_parses() {
-        assert_eq!(Ok(("", -1_635_123)), literal("-1635123"));
-        assert_eq!(Ok(("", -1_043_075_071)), literal("0xC1D3F001"));
-        assert_eq!(Err(nom::Err::Error(("Wot", ErrorKind::Alt))), literal("Wot"));
-    }
-
-    #[test]
-    fn mov_parses() {
-        assert_eq!(
-            Ok(("", [0x10, 0, 0, 0x13, 0x37, 0x23, 0])),
-            mov_instr("mov 0x00001337, 0x2300"));
-        assert_eq!(
-            Ok(("", [0x10, 0xFF, 0xFF, 0xFF, 0xFE, 0xFE, 0xED])),
-            mov_instr("mov -2, 0xFEED"));
+        assert_eq!(offset().parse(b"32767"), Ok(32_767i16));
+        assert_eq!(offset().parse(b"-32768"), Ok(-32_768i16));
+        assert_eq!(offset().parse(b"-568"), Ok(-568i16));
     }
 }
