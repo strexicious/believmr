@@ -2,6 +2,8 @@ use pom::parser::Parser;
 use pom::parser::*;
 use pom::char_class::*;
 
+use super::engine::{Instruction, Mov, Alu, Jump};
+
 fn whitespace<'a>() -> Parser<'a, u8, ()> {
     is_a(space).repeat(1..).discard()
 }
@@ -55,28 +57,28 @@ fn j_cond<'a>() -> Parser<'a, u8, u8> {
     jle | jl | je | j
 }
 
-fn mov_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+fn mov_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
     let op_code = seq(b"mov").map(|_| 0x10) - whitespace();
-    let literal = integer().map(|i| i.to_be_bytes()) - whitespace_opt();
-    let dest = sym(b',').discard() * whitespace() * mem_addr().map(|i| i.to_be_bytes());
-    (op_code + literal + dest).map(|((a, b), c)| vec![a, b[0], b[1], b[2], b[3], c[0], c[1]])
+    let literal = integer() - whitespace_opt();
+    let dest = sym(b',').discard() * whitespace() * mem_addr();
+    (op_code + literal + dest).map(|((a, b), c)| Box::new(Mov::new(b, c)) as Box<Instruction>)
 }
 
-fn alu_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+fn alu_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
     let op_code = alu_op() - whitespace();
-    let src = mem_addr().map(|i| i.to_be_bytes()) - whitespace_opt();
-    let dest = sym(b',').discard() * whitespace() * mem_addr().map(|i| i.to_be_bytes());
-    (op_code + src + dest).map(|((a, b), c)| vec![a, b[0], b[1], c[0], c[1]])
+    let src = mem_addr() - whitespace_opt();
+    let dest = sym(b',').discard() * whitespace() * mem_addr();
+    (op_code + src + dest).map(|((a, b), c)| Box::new(Alu::new(a, b, c)) as Box<Instruction>)
 }
 
-fn jmp_instr<'a>() -> Parser<'a, u8, Vec<u8>> {
+fn jmp_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
     let op_code = j_cond() - whitespace();
-    let off = offset().map(|i| i.to_be_bytes());
-    (op_code + off).map(|(a, b)| vec![a, b[0], b[1]])
+    let off = offset();
+    (op_code + off).map(|(a, b)| Box::new(Jump::new(a, b)) as Box<Instruction>)
 }
 
-pub fn instr<'a>() -> Parser<'a, u8, Vec<u8>> {
-    whitespace_opt() * (mov_instr() | alu_instr() | jmp_instr()) - (whitespace_opt() + end())
+pub fn instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
+    whitespace_opt() * (mov_instr() | alu_instr() | jmp_instr()) - (whitespace_opt() + end().opt())
 }
 
 #[cfg(test)]
