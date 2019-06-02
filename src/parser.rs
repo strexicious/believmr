@@ -61,7 +61,7 @@ fn mov_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
     let op_code = seq(b"mov").map(|_| 0x10) - whitespace();
     let literal = integer() - whitespace_opt();
     let dest = sym(b',').discard() * whitespace() * mem_addr();
-    (op_code + literal + dest).map(|((a, b), c)| Box::new(Mov::new(b, c)) as Box<Instruction>)
+    (op_code + literal + dest).map(|((_, b), c)| Box::new(Mov::new(b, c)) as Box<Instruction>)
 }
 
 fn alu_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
@@ -78,7 +78,7 @@ fn jmp_instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
 }
 
 pub fn instr<'a>() -> Parser<'a, u8, Box<dyn Instruction>> {
-    whitespace_opt() * (mov_instr() | alu_instr() | jmp_instr()) - (whitespace_opt() + end().opt())
+    (mov_instr() | alu_instr() | jmp_instr()) - end()
 }
 
 #[cfg(test)]

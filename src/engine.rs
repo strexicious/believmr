@@ -12,8 +12,8 @@ impl Context {
         Self { mem_block: [0; 65536], line_counter: 0, status_register: 0, program_size }
     }
 
-    pub fn print_mem(&self, pos: usize) {
-        println!("{}", self.mem_block[pos]);
+    pub fn print_mem(&self, pos: u16) {
+        println!("{}", self.mem_block[pos as usize]);
     }
 }
 
@@ -124,7 +124,11 @@ pub struct Process {
 
 impl Process {
     pub fn new(source_code: String) -> Self {
-        let source: Vec<String> = source_code.split('\n').map(str::to_string).collect();
+        let source: Vec<String> = source_code
+            .split('\n')
+            .map(str::trim)
+            .map(str::to_string)
+            .collect();
         Self { context: Context::new(source.len()), source }
     }
 
