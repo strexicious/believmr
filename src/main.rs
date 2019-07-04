@@ -14,7 +14,7 @@ fn main() {
     // process.run();
 
     if args[1] == "host" {
-        let mut host = cluster::Host::listen_on("127.0.0.1:3000").unwrap();
+        let mut host = cluster::Master::listen_on("127.0.0.1:3000").unwrap();
         host.accept_workers();
     } else if args[1] == "worker" {
         let mut client = cluster::Worker::register(763, "127.0.0.1:3000").unwrap();

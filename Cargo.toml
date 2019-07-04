@@ -6,3 +6,5 @@ edition = "2018"
 
 [dependencies]
 pom = "3.0.2"
+serde = { version = "1.0.94", features = ["derive"] }
+bincode = "1.1.4"
