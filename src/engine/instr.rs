@@ -10,10 +10,16 @@ pub enum DecodeError {
 }
 
 #[derive(Debug)]
+enum SysCall {
+    Print(u16),
+}
+
+#[derive(Debug)]
 pub enum Instruction {
     Mov { literal: i32, dest: u16 },
     Alu { alu_op: u8, src: u16, dest: u16 },
     Jump { jmp_op: u8, offset: i16 },
+    SysCall(SysCall),
 }
 
 impl Instruction {
@@ -21,18 +27,19 @@ impl Instruction {
         use Instruction::*;
         
         match self {
-            Mov { literal, dest } => self.execute_mov(ctx, *literal, *dest),
-            Alu { alu_op, src, dest } => self.execute_alu(ctx, *alu_op, *src, *dest),
-            Jump { jmp_op, offset } => self.execute_jmp(ctx, *jmp_op, *offset),
+            Mov { literal, dest } => Self::execute_mov(ctx, *literal, *dest),
+            Alu { alu_op, src, dest } => Self::execute_alu(ctx, *alu_op, *src, *dest),
+            Jump { jmp_op, offset } => Self::execute_jmp(ctx, *jmp_op, *offset),
+            SysCall(syscall) => Self::execute_syscall(ctx, syscall),
         }
     }
     
-    fn execute_mov(&self, ctx: &mut Context, literal: i32, dest: u16) -> Result<(), String> {
+    fn execute_mov(ctx: &mut Context, literal: i32, dest: u16) -> Result<(), String> {
         ctx.mem_block[dest as usize] = literal;
         Ok(())
     }
     
-    fn execute_alu(&self, ctx: &mut Context, alu_op: u8, src: u16, dest: u16)
+    fn execute_alu(ctx: &mut Context, alu_op: u8, src: u16, dest: u16)
         -> Result<(), String> {
         let src = ctx.mem_block[src as usize];
         let dest = &mut ctx.mem_block[dest as usize];
@@ -73,7 +80,7 @@ impl Instruction {
         Ok(())
     }
     
-    fn execute_jmp(&self, ctx: &mut Context, jmp_op: u8, offset: i16) -> Result<(), String> {
+    fn execute_jmp(ctx: &mut Context, jmp_op: u8, offset: i16) -> Result<(), String> {
         if offset < 0 && ctx.line_counter < (offset.abs() as usize) {
             return Err(String::from("invalid negative offset inside program"));
         }
@@ -92,6 +99,27 @@ impl Instruction {
             _ => return Err(format!("Invalid jump operation: {}", jmp_op)),
         }
         Ok(())
+    }
+
+    fn execute_syscall(ctx: &mut Context, syscall: &SysCall) -> Result<(), String> {
+        use SysCall::*;
+
+        match syscall {
+            Print(addr) => {
+                // WARNING: imperative code ahead, due to flat_map not working nicely with
+                // temporary array from to_be_bytes
+                let mut unicode_str = Vec::new();
+                for sep_bytes in ctx.mem_block[*addr as usize..].iter().map(|dw| dw.to_be_bytes()) {
+                    for to_print_char in sep_bytes.iter().take_while(|c| **c as char != '\0') {
+                        unicode_str.push(*to_print_char);
+                    }
+                }
+
+                println!("{}", String::from_utf8_lossy(unicode_str.as_slice()));
+                Ok(())
+            },
+            _ => Err(String::from("Unimplemented syscall")),
+        }
     }
 
     // returns an instruction and rest of bytes

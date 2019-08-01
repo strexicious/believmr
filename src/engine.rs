@@ -27,6 +27,7 @@ impl Context {
 
 pub struct Process {
     context: Context,
+    subroutines: Vec<u16>,
     program: Vec<Instruction>,
 }
 
@@ -41,7 +42,7 @@ impl Process {
             source = rest;
         }
         
-        Self { context: Context::new(program.len()), program }
+        Self { context: Context::new(program.len()), subroutines: Vec::new(), program }
     }
 
     pub fn run(&mut self) {
