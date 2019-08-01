@@ -6,9 +6,10 @@ pub enum DecodeError {
     InvalidMov,
     InvalidAlu,
     InvalidJump,
-    UnknownOpcode,
+    UnknownOpcode(u8),
 }
 
+#[derive(Debug)]
 pub enum Instruction {
     Mov { literal: i32, dest: u16 },
     Alu { alu_op: u8, src: u16, dest: u16 },
@@ -57,6 +58,16 @@ impl Instruction {
             0x17 => *dest <<= src as u32,
             0x18 => *dest = ((*dest as u32) >> (src as u32)) as i32,
             0x19 => *dest >>= src as u32,
+            0x1A => {
+                let res = i64::from(*dest) * i64::from(src);
+                *dest = res as i32;
+                ctx.special_registers.0 = (res >> 32) as i32;
+            },
+            0x1B => {
+                let res = *dest / src;
+                ctx.special_registers.0 = *dest % src;
+                *dest = res;
+            },
             _ => return Err(format!("Invalid ALU operation: {}", alu_op)),
         }
         Ok(())
@@ -87,7 +98,7 @@ impl Instruction {
     pub fn decode_instr(bytes: &[u8]) -> Result<(Self, &[u8]), DecodeError> {
         use Instruction::*;
         
-        if bytes.len() == 0 {
+        if bytes.is_empty() {
             return Err(DecodeError::NoOpcode);
         }
 
@@ -101,24 +112,24 @@ impl Instruction {
                     Ok((Mov { literal, dest }, &bytes[7..]))
                 }
             },
-            opcode@0x11...0x19 => {
+            0x11...0x19 => {
                 if bytes.len() < 5 {
                     Err(DecodeError::InvalidAlu)
                 } else {
                     let src = u16::from_be_bytes([bytes[1], bytes[2]]);
                     let dest = u16::from_be_bytes([bytes[3], bytes[4]]);
-                    Ok((Alu { alu_op: opcode, src, dest }, &bytes[5..]))
+                    Ok((Alu { alu_op: bytes[0], src, dest }, &bytes[5..]))
                 }
             },
-            opcode@0x20...0x23 => {
+            0x20...0x23 => {
                 if bytes.len() < 3 {
                     Err(DecodeError::InvalidJump)
                 } else {
                     let offset = i16::from_be_bytes([bytes[1], bytes[2]]);
-                    Ok((Jump { jmp_op: opcode, offset }, &bytes[3..]))
+                    Ok((Jump { jmp_op: bytes[0], offset }, &bytes[3..]))
                 }
             },
-            _ => Err(DecodeError::UnknownOpcode),
+            _ => Err(DecodeError::UnknownOpcode(bytes[0])),
         }
     }
 }
