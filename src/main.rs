@@ -11,8 +11,8 @@ fn main() {
     let mut source = Vec::new();
     file.read_to_end(&mut source).expect("Error reading source file.");
     
-    let mut process = engine::Process::new(source);
-    process.print_mem(0, 4);
+    let mut process = engine::Process::new(source).unwrap();
+    process.print_program();
     process.run();
-    process.print_mem(0, 4);
+    process.print_mem(0x30, 3);
 }

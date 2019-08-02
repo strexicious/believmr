@@ -6,12 +6,16 @@ pub enum DecodeError {
     InvalidMov,
     InvalidAlu,
     InvalidJump,
+    InvalidPrint,
+    InvalidSubroutine,
+    EmptySubroutine, // subroutine followed by 0 or another subroutine instructions
     UnknownOpcode(u8),
 }
 
 #[derive(Debug)]
-enum SysCall {
+pub enum SysCallCode {
     Print(u16),
+    Subroutine(u16),
 }
 
 #[derive(Debug)]
@@ -19,7 +23,7 @@ pub enum Instruction {
     Mov { literal: i32, dest: u16 },
     Alu { alu_op: u8, src: u16, dest: u16 },
     Jump { jmp_op: u8, offset: i16 },
-    SysCall(SysCall),
+    SysCall(SysCallCode),
 }
 
 impl Instruction {
@@ -101,17 +105,19 @@ impl Instruction {
         Ok(())
     }
 
-    fn execute_syscall(ctx: &mut Context, syscall: &SysCall) -> Result<(), String> {
-        use SysCall::*;
+    fn execute_syscall(ctx: &mut Context, syscall: &SysCallCode) -> Result<(), String> {
+        use SysCallCode::*;
 
         match syscall {
             Print(addr) => {
                 // WARNING: imperative code ahead, due to flat_map not working nicely with
                 // temporary array from to_be_bytes
+                // but we basically convert our integers into bytes to check for null terminator
                 let mut unicode_str = Vec::new();
-                for sep_bytes in ctx.mem_block[*addr as usize..].iter().map(|dw| dw.to_be_bytes()) {
-                    for to_print_char in sep_bytes.iter().take_while(|c| **c as char != '\0') {
-                        unicode_str.push(*to_print_char);
+                'outer: for dw in &ctx.mem_block[*addr as usize..] {
+                    for &cp in &dw.to_be_bytes() {
+                        if cp == 0x00 { break 'outer; }
+                        unicode_str.push(cp);
                     }
                 }
 
@@ -125,12 +131,20 @@ impl Instruction {
     // returns an instruction and rest of bytes
     pub fn decode_instr(bytes: &[u8]) -> Result<(Self, &[u8]), DecodeError> {
         use Instruction::*;
+        use SysCallCode::*;
         
         if bytes.is_empty() {
             return Err(DecodeError::NoOpcode);
         }
 
         match bytes[0] {
+            0x00 => {
+                if bytes.len() < 3 {
+                    Err(DecodeError::InvalidPrint)
+                } else {
+                    Ok((SysCall(Print(u16::from_be_bytes([bytes[1], bytes[2]]))), &bytes[3..]))
+                }
+            },
             0x10 => {
                 if bytes.len() < 7 {
                     Err(DecodeError::InvalidMov)
@@ -157,6 +171,14 @@ impl Instruction {
                     Ok((Jump { jmp_op: bytes[0], offset }, &bytes[3..]))
                 }
             },
+            0x30 => {
+                if bytes.len() < 3 {
+                    Err(DecodeError::InvalidSubroutine)
+                } else {
+                    let params = u16::from_be_bytes([bytes[1], bytes[2]]);
+                    Ok((SysCall(Subroutine(params)), &bytes[3..]))
+                }
+            }
             _ => Err(DecodeError::UnknownOpcode(bytes[0])),
         }
     }

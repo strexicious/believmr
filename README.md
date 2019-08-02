@@ -17,12 +17,14 @@
 | sra src dest     | 0x19   | dest = extended(dest) >> src              |
 | mul src dest     | 0x1A   | dest = dest * src, xr0 = high(dest * src) |
 | div src dest     | 0x1B   | dest = dest / src, xr0 = dest % src       |
+| movm src dest    | 0x1C   | dest = src                                |
 | j offset         | 0x20   | add offset to program counter             |
 | jl offset        | 0x21   | jump if status[1] set                     |
 | jle offset       | 0x22   | jump if status[0] or status[1] set        |
 | je offset        | 0x23   | jump if status[0] set                     |
-| call index       | 0x30   | call subroutine at index                  |
-| return           | 0x31   | returns to instr before subroutine        |
+| subrout size     | 0x30   | subroutine with size # of params          |
+| call index src   | 0x31   | call subroutine at index                  |
+| return dest      | 0x32   | returns to instr before subroutine        |
 
 ## Endianess
 
@@ -40,13 +42,11 @@ An 8 bit register where the bits as used as described:
 ## Special Registers
 
 - xr0 (32 bits) - Stores upper part of the multiplication or the remainder of a division.
-- xr1 (16 bits) - base pointer for the stack
-- xr2 (16 bits) - current pointer for the stack
-- xr3 (32 bits) - result of the last subroutine can be stored here
+- xr1 (32 bits) - result of the last subroutine can be stored here
 
 ## Subroutine Table
 
-The program must be initialized with a subroutine table info. The initialization is simply done by providing an array of memory addresses, of maximum 256 size. Subroutines can be called using 8 bit indices.
+Any instruction can be marked as the start of a new subroutine with a leading subrout instruction, and  `size` gives the number of parameters that it accepts. This instruction's line number is recorded along with the `size` in the subroutine table and is given the index [tables length - 1]. A subroutine can be invoked with `call` given an index into the table and `src` from where to fetch the arguments to the subroutine.
 
 ## About jumps
 
