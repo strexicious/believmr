@@ -1,29 +1,28 @@
 use super::Context;
+use super::SysCallInvoc;
 
 #[derive(Debug)]
 pub enum DecodeError {
     NoOpcode,
     InvalidMov,
     InvalidAlu,
+    InvalidXR0Move,
     InvalidJump,
-    InvalidPrint,
-    InvalidSubroutine,
-    EmptySubroutine, // subroutine followed by 0 or another subroutine instructions
+    InvalidSysCall,
     UnknownOpcode(u8),
 }
 
 #[derive(Debug)]
-pub enum SysCallCode {
+pub(super) enum SysCallInstr {
     Print(u16),
-    Subroutine(u16),
 }
 
 #[derive(Debug)]
-pub enum Instruction {
+pub(super) enum Instruction {
     Mov { literal: i32, dest: u16 },
     Alu { alu_op: u8, src: u16, dest: u16 },
     Jump { jmp_op: u8, offset: i16 },
-    SysCall(SysCallCode),
+    SysCall(SysCallInstr),
 }
 
 impl Instruction {
@@ -34,7 +33,7 @@ impl Instruction {
             Mov { literal, dest } => Self::execute_mov(ctx, *literal, *dest),
             Alu { alu_op, src, dest } => Self::execute_alu(ctx, *alu_op, *src, *dest),
             Jump { jmp_op, offset } => Self::execute_jmp(ctx, *jmp_op, *offset),
-            SysCall(syscall) => Self::execute_syscall(ctx, syscall),
+            SysCall(syscallinstr) => Self::execute_syscall(ctx, syscallinstr),
         }
     }
     
@@ -46,15 +45,17 @@ impl Instruction {
     fn execute_alu(ctx: &mut Context, alu_op: u8, src: u16, dest: u16)
         -> Result<(), String> {
         let src = ctx.mem_block[src as usize];
+        let mdextra = ctx.special_registers.0;
         let dest = &mut ctx.mem_block[dest as usize];
 
         match alu_op {
-            0x11 => *dest += src,
-            0x12 => *dest -= src,
-            0x13 => *dest &= src,
-            0x14 => *dest |= src,
-            0x15 => *dest ^= src,
-            0x16 => {
+            0x11 => *dest = src,
+            0x12 => *dest += src,
+            0x13 => *dest -= src,
+            0x14 => *dest &= src,
+            0x15 => *dest |= src,
+            0x16 => *dest ^= src,
+            0x17 => {
                 let cmp = *dest - src;
                 if cmp < 0 {
                     ctx.status_register |= 1 << 1;
@@ -66,19 +67,20 @@ impl Instruction {
                     ctx.status_register &= 0xFC;
                 }
             },
-            0x17 => *dest <<= src as u32,
-            0x18 => *dest = ((*dest as u32) >> (src as u32)) as i32,
-            0x19 => *dest >>= src as u32,
-            0x1A => {
+            0x18 => *dest <<= src as u32,
+            0x19 => *dest = ((*dest as u32) >> (src as u32)) as i32,
+            0x1A => *dest >>= src as u32,
+            0x1B => {
                 let res = i64::from(*dest) * i64::from(src);
                 *dest = res as i32;
                 ctx.special_registers.0 = (res >> 32) as i32;
             },
-            0x1B => {
-                let res = *dest / src;
-                ctx.special_registers.0 = *dest % src;
-                *dest = res;
+            0x1C => {
+                let modulo = *dest % src;
+                *dest /= src;
+                ctx.special_registers.0 = modulo;
             },
+            0x1D => *dest = mdextra,
             _ => return Err(format!("Invalid ALU operation: {}", alu_op)),
         }
         Ok(())
@@ -87,9 +89,6 @@ impl Instruction {
     fn execute_jmp(ctx: &mut Context, jmp_op: u8, offset: i16) -> Result<(), String> {
         if offset < 0 && ctx.line_counter < (offset.abs() as usize) {
             return Err(String::from("invalid negative offset inside program"));
-        }
-        if offset > 0 && (ctx.program_size - ctx.line_counter) < (offset as usize) {
-            return Err(String::from("invalid positive offset inside program"));
         }
 
         let new_line = ((ctx.line_counter as isize) + (offset as isize)) as usize;
@@ -105,8 +104,8 @@ impl Instruction {
         Ok(())
     }
 
-    fn execute_syscall(ctx: &mut Context, syscall: &SysCallCode) -> Result<(), String> {
-        use SysCallCode::*;
+    fn execute_syscall(ctx: &mut Context, syscall: &SysCallInstr) -> Result<(), String> {
+        use SysCallInstr::*;
 
         match syscall {
             Print(addr) => {
@@ -120,18 +119,16 @@ impl Instruction {
                         unicode_str.push(cp);
                     }
                 }
-
-                println!("{}", String::from_utf8_lossy(unicode_str.as_slice()));
-                Ok(())
-            },
-            _ => Err(String::from("Unimplemented syscall")),
+                ctx.syscall_invoc = Some(SysCallInvoc::Print(String::from_utf8_lossy(unicode_str.as_slice()).into()))
+            }
         }
+        Ok(())
     }
 
     // returns an instruction and rest of bytes
     pub fn decode_instr(bytes: &[u8]) -> Result<(Self, &[u8]), DecodeError> {
         use Instruction::*;
-        use SysCallCode::*;
+        use SysCallInstr::*;
         
         if bytes.is_empty() {
             return Err(DecodeError::NoOpcode);
@@ -140,7 +137,7 @@ impl Instruction {
         match bytes[0] {
             0x00 => {
                 if bytes.len() < 3 {
-                    Err(DecodeError::InvalidPrint)
+                    Err(DecodeError::InvalidSysCall)
                 } else {
                     Ok((SysCall(Print(u16::from_be_bytes([bytes[1], bytes[2]]))), &bytes[3..]))
                 }
@@ -154,7 +151,7 @@ impl Instruction {
                     Ok((Mov { literal, dest }, &bytes[7..]))
                 }
             },
-            0x11...0x19 => {
+            0x11..=0x1C => {
                 if bytes.len() < 5 {
                     Err(DecodeError::InvalidAlu)
                 } else {
@@ -163,7 +160,15 @@ impl Instruction {
                     Ok((Alu { alu_op: bytes[0], src, dest }, &bytes[5..]))
                 }
             },
-            0x20...0x23 => {
+            0x1D => {
+                if bytes.len() < 3 {
+                    Err(DecodeError::InvalidXR0Move)
+                } else {
+                    let dest = u16::from_be_bytes([bytes[1], bytes[2]]);
+                    Ok((Alu { alu_op: bytes[0], src: 0, dest }, &bytes[3..]))
+                }
+            },
+            0x20..=0x23 => {
                 if bytes.len() < 3 {
                     Err(DecodeError::InvalidJump)
                 } else {
@@ -171,14 +176,6 @@ impl Instruction {
                     Ok((Jump { jmp_op: bytes[0], offset }, &bytes[3..]))
                 }
             },
-            0x30 => {
-                if bytes.len() < 3 {
-                    Err(DecodeError::InvalidSubroutine)
-                } else {
-                    let params = u16::from_be_bytes([bytes[1], bytes[2]]);
-                    Ok((SysCall(Subroutine(params)), &bytes[3..]))
-                }
-            }
             _ => Err(DecodeError::UnknownOpcode(bytes[0])),
         }
     }
