@@ -1,3 +1,5 @@
+![](./logo.jpg)
+
 # BelieVMr Specs
 
 [![issues](https://img.shields.io/github/issues/strexicious/believmr?style=flat-square)](https://github.com/strexicious/believmr/issues)

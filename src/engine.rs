@@ -1,8 +1,9 @@
-pub mod instr;
-
 use instr::{Instruction, DecodeError};
 
-type Memory = [i32; 65536];
+pub mod instr;
+
+const MEM_SIZE: usize = 65536;
+type Memory = Vec<i32>;
 type SpecialRegisterBlock = (i32, );
 
 pub enum SysCallInvoc {
@@ -20,7 +21,7 @@ struct Context {
 impl Context {
     fn new() -> Self {
         Self {
-            mem_block: [0; 65536],
+            mem_block: vec![0; MEM_SIZE],
             line_counter: 0,
             status_register: 0,
             special_registers: (0, ),
@@ -56,14 +57,14 @@ impl Process {
 
     pub fn run(&mut self) {
         while self.context.line_counter < self.program.len() {
-            if let Some(syscall_invoc) = self.context.syscall_invoc.take() {
-                (self.syscall_handler)(&syscall_invoc);
-            }
-            
             self.context.line_counter += 1;
             self.program[self.context.line_counter - 1]
                 .execute(&mut self.context)
                 .unwrap();
+
+            if let Some(syscall_invoc) = self.context.syscall_invoc.take() {
+                (self.syscall_handler)(&syscall_invoc);
+            }
         }
     }
 

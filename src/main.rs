@@ -21,7 +21,6 @@ fn main() {
         }
     }
     
-    println!("{:?}", source);
     let mut process = engine::Process::new(source, handle_syscall).unwrap();
     process.run();
 }
