@@ -59,3 +59,16 @@ The program counter is incremented before decodification, thus, jumps must take 
 - [ ] Implement threads and make context thread level
 - [ ] Dynamic linking / loaded libraries
 - [ ] I/O (is maybe related to interrupts)
+
+## Cluster Architecture
+
+The following is the current idea of how a user would perceive this system.
+
+![](./cluster_architecture.jpg)
+
+The user would access the website and write her assembly program and submit for execution. If I ever decide to write my own programming language, it may available for writing programs on the same website. Another possible feature would be on submission, the user would need to send a "reward key" of some sort, which would be validated by the service before executing the program on the worker, and reward the worker when finished.
+
+The possibility of other protocols of communication and interfaces to the service are open, but we stick to today's ultimately popular HTTP protocol for now.
+
+The design and implementation of workers management is still WIP, but the general idea is any person on an IP network would be able to register themselves as workers on the service and give their CPU time for execution of the programs submitted to the BelieVMr service.
+
